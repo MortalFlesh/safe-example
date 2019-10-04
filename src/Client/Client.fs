@@ -15,7 +15,11 @@ open Shared
 // in this case, we are keeping track of a counter
 // we mark it as optional, because initially it will not be available from the client
 // the initial value will be requested from server
-type Model = { Counter: Counter option }
+type Model =
+    {
+        Counter: Counter option
+        Events: Events
+    }
 
 // The Msg type defines what events/actions can occur while the application is running
 // the state of the application changes *only* in reaction to these events
@@ -23,6 +27,7 @@ type Msg =
     | Increment
     | Decrement
     | InitialCountLoaded of Counter
+    | ReloadEvents of Events
 
 module Server =
 
@@ -30,32 +35,57 @@ module Server =
     open Fable.Remoting.Client
 
     /// A proxy you can use to talk to server directly
-    let api : ICounterApi =
-      Remoting.createApi()
-      |> Remoting.withRouteBuilder Route.builder
-      |> Remoting.buildProxy<ICounterApi>
+    let api : IApplicationApi =
+        Remoting.createApi()
+        |> Remoting.withRouteBuilder Route.builder
+        |> Remoting.buildProxy<IApplicationApi>
+
 let initialCounter = Server.api.initialCounter
+
+let mutable refreshingStarted = false
+
+let refreshEventsInInterval dispatch =
+    if not refreshingStarted then
+        async {
+            printfn "Refresh events start ..."
+            while true do
+                printfn "Refresh events ..."
+
+                let! events = Server.api.loadEvents()
+                dispatch (ReloadEvents events)
+
+                do! Async.Sleep (10 * 1000)
+        }
+        |> Async.StartImmediate
+    refreshingStarted <- true
 
 // defines the initial state and initial command (= side-effect) of the application
 let init () : Model * Cmd<Msg> =
-    let initialModel = { Counter = None }
+    let initialModel = {
+        Counter = None
+        Events = []
+    }
     let loadCountCmd =
         Cmd.OfAsync.perform initialCounter () InitialCountLoaded
+
     initialModel, loadCountCmd
 
 // The update function computes the next state of the application based on the current state and the incoming events/messages
 // It can also run side-effects (encoded as commands) like calling the server via Http.
 // these commands in turn, can dispatch messages to which the update function will react.
 let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
-    match currentModel.Counter, msg with
-    | Some counter, Increment ->
+    match currentModel, msg with
+    | { Counter = Some counter }, Increment ->
         let nextModel = { currentModel with Counter = Some { Value = counter.Value + 1 } }
         nextModel, Cmd.none
-    | Some counter, Decrement ->
+    | { Counter = Some counter }, Decrement ->
         let nextModel = { currentModel with Counter = Some { Value = counter.Value - 1 } }
         nextModel, Cmd.none
-    | _, InitialCountLoaded initialCount->
-        let nextModel = { Counter = Some initialCount }
+    | { Events = events }, InitialCountLoaded initialCount ->
+        let nextModel = { Counter = Some initialCount; Events = events }
+        nextModel, Cmd.none
+    | { Counter = counter }, ReloadEvents events ->
+        let nextModel = { Counter = counter; Events = events }
         nextModel, Cmd.none
     | _ -> currentModel, Cmd.none
 
@@ -218,6 +248,8 @@ let counter (model : Model) (dispatch : Msg -> unit) =
                 [ str "-" ] ] ]
 
 let columns (model : Model) (dispatch : Msg -> unit) =
+    refreshEventsInInterval dispatch
+
     Columns.columns [ ]
         [ Column.column [ Column.Width (Screen.All, Column.Is6) ]
             [ Card.card [ CustomClass "events-card" ]
@@ -233,19 +265,21 @@ let columns (model : Model) (dispatch : Msg -> unit) =
                               [ Table.IsFullWidth
                                 Table.IsStriped ]
                               [ tbody [ ]
-                                  [ for _ in 1..10 ->
+                                  [ for event in model.Events ->
                                       tr [ ]
                                           [ td [ Style [ Width "5%" ] ]
                                               [ Icon.icon
                                                   [ ]
                                                   [ Fa.i [ Fa.Regular.Bell ] [] ] ]
                                             td [ ]
-                                                [ str "Lorem ipsum dolor aire" ]
+                                                [ str event.Type ]
+                                            td [ ]
+                                                [ str <| sprintf "(%s)" event.CorrelationId ]
                                             td [ ]
                                                 [ Button.a
                                                     [ Button.Size IsSmall
                                                       Button.Color IsPrimary ]
-                                                    [ str "Action" ] ] ] ] ] ] ]
+                                                    [ str "Detail" ] ] ] ] ] ] ]
                   Card.footer [ ]
                       [ Card.Footer.div [ ]
                           [ str "View All" ] ] ] ]

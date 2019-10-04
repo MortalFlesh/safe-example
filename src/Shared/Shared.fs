@@ -2,6 +2,13 @@ namespace Shared
 
 type Counter = { Value : int }
 
+type Event = {
+    Type: string
+    CorrelationId: string
+}
+
+type Events = Event list
+
 module Route =
     /// Defines how routes are generated on server and mapped from client
     let builder typeName methodName =
@@ -9,6 +16,8 @@ module Route =
 
 /// A type that specifies the communication protocol between client and server
 /// to learn more, read the docs at https://zaid-ajaj.github.io/Fable.Remoting/src/basics.html
-type ICounterApi =
-    { initialCounter : unit -> Async<Counter> }
-
+type IApplicationApi =
+    {
+        initialCounter: unit -> Async<Counter>
+        loadEvents: unit -> Async<Events>
+    }
